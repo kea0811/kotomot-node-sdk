@@ -1,0 +1,46 @@
+{
+  "name": "koto-node-sdk",
+  "version": "1.0.0",
+  "description": "Node.js SDK for Koto Translation Management System",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf lib",
+    "test": "jest",
+    "prepare": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "koto",
+    "translation",
+    "i18n",
+    "localization",
+    "nodejs",
+    "sdk",
+    "api"
+  ],
+  "author": "kea0811",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kea0811/koto-node-sdk.git"
+  },
+  "homepage": "https://github.com/kea0811/koto-node-sdk",
+  "bugs": {
+    "url": "https://github.com/kea0811/koto-node-sdk/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/node-fetch": "^2.6.2",
+    "@types/jest": "^29.0.0",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  }
+}
