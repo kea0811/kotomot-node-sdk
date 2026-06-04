@@ -1,16 +1,23 @@
 import fetch, { RequestInit } from 'node-fetch';
 import {
   KotoConfig,
-  TranslationOptions, 
-  UpdateTranslationOptions,
-  BatchUpdateOptions,
+  TranslationOptions,
+  ImportOptions,
+  LocalesResponse,
   ApiResponse,
-  ProjectInfo,
   RequestOptions,
-  Logger
+  Logger,
+  LogLevel,
 } from './types';
 import { CacheManager } from './cache';
 
+/**
+ * Server-side client for the Kotomot translation API.
+ *
+ * Reads the published translations a project serves to its apps, and (with a
+ * key that has `write:translations`) imports translations back. Designed for
+ * SSR, build tooling, and CLIs.
+ */
 export class KotoClient {
   private config: KotoConfig;
   private cache: CacheManager;
@@ -22,237 +29,114 @@ export class KotoClient {
     }
 
     this.config = {
-      baseUrl: 'https://api.koto.dev',
+      baseUrl: 'https://api.kotomot.app',
       timeout: 30000,
       retryAttempts: 3,
       retryDelay: 1000,
-      ...config
+      ...config,
     };
 
     this.cache = new CacheManager(config.cache);
   }
 
-  /**
-   * Set a custom logger
-   */
+  /** Install a custom logger. */
   setLogger(logger: Logger): void {
     this.logger = logger;
   }
 
   /**
-   * Get translations for a project
+   * Fetch the published translations for a locale.
+   * GET /v1/translations
+   * @returns a flat map of `{ keyPath: value }`.
    */
   async getTranslations(
     projectId: string,
     options: TranslationOptions
-  ): Promise<any> {
-    const cacheKey = this.cache.getCacheKey('translations', {
-      projectId,
-      ...options
-    });
+  ): Promise<Record<string, string>> {
+    const cacheKey = this.cache.getCacheKey('translations', { projectId, ...options });
 
-    // Check cache first
-    const cached = await this.cache.get(cacheKey);
+    const cached = await this.cache.get<Record<string, string>>(cacheKey);
     if (cached) {
       this.log('debug', 'Returning cached translations', { cacheKey });
       return cached;
     }
 
-    const query = new URLSearchParams({
-      projectId,
-      locale: options.locale,
-      ...(options.namespace && { namespace: options.namespace }),
-      ...(options.fallbackLocale && { fallbackLocale: options.fallbackLocale }),
-      ...(options.includeMetadata && { include_metadata: 'true' }),
-      ...(options.skipEmpty && { skip_empty: 'true' })
-    });
-
-    const response = await this.request('/api/v1/translations', {
-      method: 'GET',
-      query: Object.fromEntries(query)
-    });
-
-    if (response.success && response.data) {
-      // Cache the successful response
-      await this.cache.set(cacheKey, response.data);
-    }
-
-    return response.data;
-  }
-
-  /**
-   * Update a single translation
-   */
-  async updateTranslation(options: UpdateTranslationOptions): Promise<ApiResponse> {
-    const response = await this.request('/api/v1/translations/update', {
-      method: 'PUT',
-      body: options
-    });
-
-    // Clear related cache
-    await this.clearTranslationCache(options.projectId, options.locale);
-
-    return response;
-  }
-
-  /**
-   * Batch update translations
-   */
-  async batchUpdateTranslations(options: BatchUpdateOptions): Promise<ApiResponse> {
-    const response = await this.request('/api/v1/translations', {
-      method: 'POST',
-      body: options
-    });
-
-    // Clear related cache
-    await this.clearTranslationCache(options.projectId, options.locale);
-
-    return response;
-  }
-
-  /**
-   * Get project information
-   */
-  async getProjectInfo(projectId: string): Promise<ProjectInfo> {
-    const cacheKey = this.cache.getCacheKey('project', { projectId });
-    
-    const cached = await this.cache.get<ProjectInfo>(cacheKey);
-    if (cached) {
-      return cached;
-    }
-
-    const response = await this.request(`/api/v1/projects/${projectId}`, {
-      method: 'GET'
-    });
-
-    if (response.success && response.data) {
-      await this.cache.set(cacheKey, response.data, 3600); // Cache for 1 hour
-      return response.data;
-    }
-
-    throw new Error(response.error || 'Failed to fetch project info');
-  }
-
-  /**
-   * Create a new translation key
-   */
-  async createTranslationKey(
-    projectId: string,
-    keyPath: string,
-    translations: Record<string, string>,
-    namespace?: string
-  ): Promise<ApiResponse> {
-    const response = await this.request('/api/v1/translations/key', {
-      method: 'POST',
-      body: {
-        projectId,
-        keyPath,
-        translations,
-        namespace
-      }
-    });
-
-    // Clear cache for all affected locales
-    for (const locale of Object.keys(translations)) {
-      await this.clearTranslationCache(projectId, locale);
-    }
-
-    return response;
-  }
-
-  /**
-   * Delete a translation key
-   */
-  async deleteTranslationKey(
-    projectId: string,
-    keyPath: string,
-    namespace?: string
-  ): Promise<ApiResponse> {
-    const response = await this.request('/api/v1/translations/key', {
-      method: 'DELETE',
-      body: {
-        projectId,
-        keyPath,
-        namespace
-      }
-    });
-
-    // Clear all cache for this project
-    await this.cache.clear();
-
-    return response;
-  }
-
-  /**
-   * Export translations in various formats
-   */
-  async exportTranslations(
-    projectId: string,
-    locale: string,
-    format: 'json' | 'yaml' | 'csv' | 'xliff' = 'json'
-  ): Promise<any> {
-    const response = await this.request('/api/v1/translations/export', {
+    const res = await this.request('/v1/translations', {
       method: 'GET',
       query: {
         projectId,
-        locale,
-        format
-      }
+        locale: options.locale,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        ...(options.environment ? { environment: options.environment } : {}),
+      },
     });
 
-    return response.data;
+    if (!res.success) {
+      throw new Error(res.error || 'Failed to fetch translations');
+    }
+
+    const translations: Record<string, string> = (res.data && res.data.translations) || {};
+    await this.cache.set(cacheKey, translations);
+    return translations;
   }
 
   /**
-   * Import translations from file
+   * The project's current published version string (or null).
+   * GET /v1/translations/version
    */
-  async importTranslations(
-    projectId: string,
-    locale: string,
-    data: any,
-    format: 'json' | 'yaml' | 'csv' | 'xliff' = 'json',
-    options: { replace?: boolean; namespace?: string } = {}
-  ): Promise<ApiResponse> {
-    const response = await this.request('/api/v1/translations/import', {
+  async getVersion(projectId: string): Promise<string | null> {
+    const res = await this.request('/v1/translations/version', {
+      method: 'GET',
+      query: { projectId },
+    });
+    return res.success && res.data ? (res.data.version ?? null) : null;
+  }
+
+  /**
+   * The locales a project supports (source-first), for building a picker.
+   * GET /v1/locales
+   */
+  async getLocales(projectId: string): Promise<LocalesResponse> {
+    const res = await this.request('/v1/locales', {
+      method: 'GET',
+      query: { projectId },
+    });
+    if (!res.success) {
+      throw new Error(res.error || 'Failed to fetch locales');
+    }
+    return res.data as LocalesResponse;
+  }
+
+  /**
+   * Import translations into a project. Requires a key with `write:translations`.
+   * POST /projects/:projectId/import/apply
+   *
+   * `content` is a JSON/CSV string in the same shape the dashboard import
+   * accepts (the locales are encoded in the content).
+   */
+  async importTranslations(projectId: string, options: ImportOptions): Promise<ApiResponse> {
+    const res = await this.request(`/projects/${encodeURIComponent(projectId)}/import/apply`, {
       method: 'POST',
       body: {
-        projectId,
-        locale,
-        data,
-        format,
-        ...options
-      }
+        format: options.format,
+        content: options.content,
+        ...(options.namespace ? { namespace: options.namespace } : {}),
+        conflictResolution: options.conflictResolution ?? 'replace',
+        createMissingKeys: options.createMissingKeys ?? true,
+      },
     });
-
-    // Clear cache for this project and locale
-    await this.clearTranslationCache(projectId, locale);
-
-    return response;
+    // The imported content is now live — drop any cached reads for this project.
+    await this.cache.clear();
+    return res;
   }
 
   /**
-   * Clear translation cache
+   * Make an HTTP request with retry/backoff. Returns the raw parsed JSON in
+   * `data`; callers unwrap the field they need.
    */
-  private async clearTranslationCache(projectId: string, locale?: string): Promise<void> {
-    if (locale) {
-      const cacheKey = this.cache.getCacheKey('translations', { projectId, locale });
-      await this.cache.delete(cacheKey);
-    } else {
-      // Clear all cache if no locale specified
-      await this.cache.clear();
-    }
-  }
-
-  /**
-   * Make HTTP request with retry logic
-   */
-  private async request(
-    endpoint: string,
-    options: RequestOptions = {}
-  ): Promise<ApiResponse> {
+  private async request(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse> {
     const url = new URL(endpoint, this.config.baseUrl);
-    
-    // Add query parameters
+
     if (options.query) {
       Object.entries(options.query).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
@@ -265,11 +149,11 @@ export class KotoClient {
       method: options.method || 'GET',
       headers: {
         'Content-Type': 'application/json',
-        ...this.getAuthHeaders(options.method),
+        'x-api-key': this.config.apiKey,
         ...this.config.headers,
-        ...options.headers
+        ...options.headers,
       },
-      timeout: options.timeout || this.config.timeout
+      timeout: options.timeout || this.config.timeout,
     };
 
     if (options.body) {
@@ -282,68 +166,38 @@ export class KotoClient {
 
     for (let attempt = 0; attempt < retryAttempts; attempt++) {
       try {
-        this.log('debug', `Making request to ${url.toString()}`, {
-          method: requestOptions.method,
-          attempt: attempt + 1
-        });
+        this.log('debug', `Request ${requestOptions.method} ${url.toString()}`, { attempt: attempt + 1 });
 
         const response = await fetch(url.toString(), requestOptions);
-        const data = await response.json();
+        const data: any = await response.json().catch(() => ({}));
 
         if (!response.ok) {
           throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
         }
 
-        return {
-          success: true,
-          data: data.translations || data
-        };
+        return { success: true, data };
       } catch (error) {
         lastError = error as Error;
-        this.log('warn', `Request failed (attempt ${attempt + 1}/${retryAttempts})`, {
-          error: lastError.message
-        });
-
+        this.log('warn', `Request failed (attempt ${attempt + 1}/${retryAttempts})`, { error: lastError.message });
         if (attempt < retryAttempts - 1) {
-          await this.delay(retryDelay * Math.pow(2, attempt)); // Exponential backoff
+          await this.delay(retryDelay * Math.pow(2, attempt));
         }
       }
     }
 
     this.log('error', 'All request attempts failed', { error: lastError?.message });
-    
-    return {
-      success: false,
-      error: lastError?.message || 'Request failed after all retry attempts'
-    };
+    return { success: false, error: lastError?.message || 'Request failed after all retry attempts' };
   }
 
-  /**
-   * Get authentication headers based on request method
-   */
-  private getAuthHeaders(method?: string): Record<string, string> {
-    if (method === 'GET') {
-      return { 'X-API-Key': this.config.apiKey };
-    } else {
-      return { 'Authorization': `Bearer ${this.config.apiKey}` };
-    }
-  }
-
-  /**
-   * Delay helper for retry logic
-   */
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  /**
-   * Internal logging
-   */
-  private log(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: any): void {
+  private log(level: LogLevel, message: string, data?: any): void {
     if (this.logger) {
       this.logger[level](message, data);
     } else if (process.env.NODE_ENV === 'development') {
-      console[level](`[Koto SDK] ${message}`, data || '');
+      console[level](`[Kotomot SDK] ${message}`, data || '');
     }
   }
 }

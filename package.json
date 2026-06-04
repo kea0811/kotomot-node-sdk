@@ -1,7 +1,7 @@
 {
-  "name": "koto-node-sdk",
-  "version": "1.0.0",
-  "description": "Node.js SDK for Koto Translation Management System",
+  "name": "kotomot-node-sdk",
+  "version": "2.0.0",
+  "description": "Node.js SDK for the Kotomot translation management API",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "scripts": {
@@ -23,11 +23,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/kea0811/koto-node-sdk.git"
+    "url": "https://github.com/kea0811/kotomot-node-sdk.git"
   },
-  "homepage": "https://github.com/kea0811/koto-node-sdk",
+  "homepage": "https://github.com/kea0811/kotomot-node-sdk",
   "bugs": {
-    "url": "https://github.com/kea0811/koto-node-sdk/issues"
+    "url": "https://github.com/kea0811/kotomot-node-sdk/issues"
   },
   "engines": {
     "node": ">=14.0.0"

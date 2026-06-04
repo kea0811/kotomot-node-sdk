@@ -1,7 +1,8 @@
 export interface KotoConfig {
+  /** A key generated in the dashboard. Required. */
   apiKey: string;
+  /** API host. Defaults to https://api.kotomot.app. */
   baseUrl?: string;
-  projectId?: string;
   timeout?: number;
   retryAttempts?: number;
   retryDelay?: number;
@@ -11,9 +12,9 @@ export interface KotoConfig {
 
 export interface CacheConfig {
   enabled?: boolean;
-  ttl?: number; // Time to live in seconds
+  ttl?: number; // seconds
   storage?: 'memory' | 'redis' | 'custom';
-  redisClient?: any; // Redis client instance if using redis
+  redisClient?: any;
   customStorage?: CacheStorage;
 }
 
@@ -24,28 +25,42 @@ export interface CacheStorage {
   clear(): Promise<void>;
 }
 
+/** Options for {@link KotoClient.getTranslations}. */
 export interface TranslationOptions {
   locale: string;
+  /** Filter to a single namespace. */
   namespace?: string;
-  fallbackLocale?: string;
-  includeMetadata?: boolean;
-  skipEmpty?: boolean;
+  /** Serve the version pinned to this environment slug. */
+  environment?: string;
 }
 
-export interface UpdateTranslationOptions {
-  projectId: string;
-  keyPath: string;
-  locale: string;
-  translation: string;
+/** Options for {@link KotoClient.importTranslations}. */
+export interface ImportOptions {
+  /** Content format, e.g. 'json' or 'csv'. */
+  format: string;
+  /** The file contents as a string (locales are encoded in the content). */
+  content: string;
+  /** Assign imported keys to this namespace. */
   namespace?: string;
+  /** What to do when a key already exists. Defaults to 'replace'. */
+  conflictResolution?: 'replace' | 'skip';
+  /** Create keys that don't exist yet. Defaults to true. */
+  createMissingKeys?: boolean;
 }
 
-export interface BatchUpdateOptions {
+export interface LocaleInfo {
+  code: string;
+  name: string;
+  nativeName: string;
+  flag: string;
+  direction: 'ltr' | 'rtl';
+  isDefault: boolean;
+}
+
+export interface LocalesResponse {
   projectId: string;
-  locale: string;
-  translations: Record<string, any>;
-  namespace?: string;
-  replace?: boolean;
+  defaultLocale: string | null;
+  locales: LocaleInfo[];
 }
 
 export interface ApiResponse<T = any> {
@@ -53,32 +68,6 @@ export interface ApiResponse<T = any> {
   data?: T;
   error?: string;
   message?: string;
-}
-
-export interface Translation {
-  key: string;
-  value: string;
-  locale: string;
-  namespace?: string;
-  metadata?: TranslationMetadata;
-}
-
-export interface TranslationMetadata {
-  lastModified?: Date;
-  author?: string;
-  version?: string;
-  status?: 'draft' | 'published' | 'archived';
-  tags?: string[];
-}
-
-export interface ProjectInfo {
-  id: string;
-  name: string;
-  locales: string[];
-  defaultLocale: string;
-  namespaces?: string[];
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 export interface RequestOptions {
